@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Fitness Foundation</title>
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Fitness Foundation" />
+  <meta name="theme-color" content="#060609" />
+  <link rel="manifest" href="manifest.json" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { background: #060609; font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif; overflow-x: hidden; }
+    input, select, textarea, button { font-family: inherit; }
+    input[type="number"]::-webkit-inner-spin-button,
+    input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type="number"] { -moz-appearance: textfield; }
+    ::-webkit-scrollbar { display: none; }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.12.2/Recharts.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useCallback } = React;
+    const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, AreaChart, Area } = Recharts;
+
+    /* ══════════════════════════════════════════════════════════
+       STORAGE (localStorage for standalone)
+       ══════════════════════════════════════════════════════════ */
+    const SKEYS = { log: "hfp:log", meso: "hfp:meso", program: "hfp:program", schedule: "hfp:schedule" };
+    const saveData = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e) {} };
+    const loadData = (k) => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : null; } catch { return null; } };
+
+    /* ══════════════════════════════════════════════════════════
+       SCHEDULE & CONFIG
+       ══════════════════════════════════════════════════════════ */
+    const SCHEDULE_A = { id: "A", label: "Schedule A — Strength", repRange: "4-8 reps", sets: 4, repsLow: 4, repsHigh: 8, rest: "2-4 min" };
+    const SCHEDULE_B = { id: "B", label: "Schedule B — Hypertrophy", repRange: "8-15 reps", sets: 3, repsLow: 8, repsHigh: 15, rest: "~90 sec" };
+    const DAY_TYPES = { lifting: "lifting", cardio: "cardio", hiit: "hiit" };
+    const MESO_WEEKS = 5;
+    const DELOAD_WEEK = 5;
+
+    const getPrescription = (schedule, baseSets, week) => {
+      const isDeload = week === DELOAD_WEEK;
+      if (isDeload) return { sets: Math.max(2, Math.ceil(baseSets * 0.5)), rir: 4, reps: schedule.id === "A" ? 6 : 10 };
+      const setBonus = [0, 0, 1, 1][week - 1] || 0;
+      const rir = [3, 3, 2, 1][week - 1] || 3;
+      return { sets: baseSets + setBonus, rir, reps: schedule.id === "A" ? 6 : 12 };
+    };
+
+    /* ══════════════════════════════════════════════════════════
+       EXERCISE DATABASE
+       ══════════════════════════════════════════════════════════ */
+    const EXERCISE_DB = {
+      quad_lengthened: [
+        { id: "leg_ext", name: "Leg Extension", muscle: "Quads", position: "Lengthened" },
+        { id: "sissy_squat", name: "Sissy Squat", muscle: "Quads", position: "Lengthened" },
+        { id: "reverse_nordic", name: "Reverse Nordic Curl", muscle: "Quads", position: "Lengthened" },
+        { id: "spanish_squat", name: "Spanish Squat", muscle: "Quads", position: "Lengthened" },
+        { id: "single_leg_ext", name: "Single Leg Extension", muscle: "Quads", position: "Lengthened" },
+      ],
+      quad_shortened: [
+        { id: "hack_squat", name: "Hack Squat", muscle: "Quads", position: "Shortened" },
+        { id: "leg_press", name: "Leg Press", muscle: "Quads", position: "Shortened" },
+        { id: "squat", name: "Barbell Back Squat", muscle: "Quads", position: "Shortened" },
+        { id: "front_squat", name: "Front Squat", muscle: "Quads", position: "Shortened" },
+        { id: "goblet_squat", name: "Goblet Squat", muscle: "Quads", position: "Shortened" },
+        { id: "bulgarian", name: "Bulgarian Split Squat", muscle: "Quads", position: "Shortened" },
+        { id: "belt_squat", name: "Belt Squat", muscle: "Quads", position: "Shortened" },
+        { id: "smith_squat", name: "Smith Machine Squat", muscle: "Quads", position: "Shortened" },
+        { id: "pendulum_squat", name: "Pendulum Squat", muscle: "Quads", position: "Shortened" },
+        { id: "walking_lunge", name: "Walking Lunge", muscle: "Quads", position: "Shortened" },
+        { id: "step_up", name: "Barbell Step-Up", muscle: "Quads", position: "Shortened" },
+      ],
+      ham_lengthened: [
+        { id: "leg_curl", name: "Lying Leg Curl", muscle: "Hamstrings", position: "Lengthened" },
+        { id: "seated_leg_curl", name: "Seated Leg Curl", muscle: "Hamstrings", position: "Lengthened" },
+        { id: "nordic_curl", name: "Nordic Curl", muscle: "Hamstrings", position: "Lengthened" },
+        { id: "single_leg_curl", name: "Single Leg Curl", muscle: "Hamstrings", position: "Lengthened" },
+        { id: "slider_curl", name: "Slider Leg Curl", muscle: "Hamstrings", position: "Lengthened" },
+        { id: "swiss_ball_curl", name: "Swiss Ball Leg Curl", muscle: "Hamstrings", position: "Lengthened" },
+      ],
+      ham_shortened: [
+        { id: "glute_ham_raise", name: "Glute-Ham Raise", muscle: "Hamstrings", position: "Shortened" },
+        { id: "rdl", name: "Romanian Deadlift", muscle: "Hamstrings", position: "Shortened" },
+        { id: "hip_thrust", name: "Barbell Hip Thrust", muscle: "Glutes/Hams", position: "Shortened" },
+        { id: "stiff_leg_dl", name: "Stiff-Leg Deadlift", muscle: "Hamstrings", position: "Shortened" },
+        { id: "single_leg_rdl", name: "Single Leg RDL", muscle: "Hamstrings", position: "Shortened" },
+        { id: "good_morning", name: "Good Morning", muscle: "Hamstrings", position: "Shortened" },
+        { id: "cable_pull_through", name: "Cable Pull-Through", muscle: "Glutes/Hams", position: "Shortened" },
+        { id: "reverse_hyper", name: "Reverse Hyperextension", muscle: "Glutes/Hams", position: "Shortened" },
+        { id: "45_back_ext", name: "45° Back Extension", muscle: "Glutes/Hams", position: "Shortened" },
+      ],
+      calf_lengthened: [
+        { id: "standing_calf", name: "Standing Calf Raise", muscle: "Calves", position: "Lengthened" },
+        { id: "donkey_calf", name: "Donkey Calf Raise", muscle: "Calves", position: "Lengthened" },
+        { id: "leg_press_calf", name: "Leg Press Calf Raise", muscle: "Calves", position: "Lengthened" },
+        { id: "single_leg_calf", name: "Single Leg Calf Raise", muscle: "Calves", position: "Lengthened" },
+        { id: "smith_calf", name: "Smith Machine Calf Raise", muscle: "Calves", position: "Lengthened" },
+      ],
+      calf_shortened: [
+        { id: "seated_calf", name: "Seated Calf Raise", muscle: "Calves", position: "Shortened" },
+        { id: "bent_knee_calf", name: "Bent-Knee Calf Raise", muscle: "Calves", position: "Shortened" },
+      ],
+      chest_lengthened: [
+        { id: "incline_press", name: "Incline Barbell Press", muscle: "Chest", position: "Lengthened" },
+        { id: "db_bench", name: "Dumbbell Bench Press", muscle: "Chest", position: "Lengthened" },
+        { id: "bench_press", name: "Barbell Bench Press", muscle: "Chest", position: "Lengthened" },
+        { id: "incline_db", name: "Incline Dumbbell Press", muscle: "Chest", position: "Lengthened" },
+        { id: "decline_press", name: "Decline Bench Press", muscle: "Chest", position: "Lengthened" },
+        { id: "decline_db", name: "Decline Dumbbell Press", muscle: "Chest", position: "Lengthened" },
+        { id: "chest_dip", name: "Weighted Chest Dip", muscle: "Chest", position: "Lengthened" },
+        { id: "smith_bench", name: "Smith Machine Bench", muscle: "Chest", position: "Lengthened" },
+        { id: "smith_incline", name: "Smith Machine Incline", muscle: "Chest", position: "Lengthened" },
+        { id: "machine_chest_press", name: "Machine Chest Press", muscle: "Chest", position: "Lengthened" },
+        { id: "floor_press", name: "Dumbbell Floor Press", muscle: "Chest", position: "Lengthened" },
+        { id: "landmine_press", name: "Landmine Press", muscle: "Chest", position: "Lengthened" },
+      ],
+      chest_shortened: [
+        { id: "cable_crossover", name: "Cable Crossover", muscle: "Chest", position: "Shortened" },
+        { id: "pec_deck", name: "Pec Deck", muscle: "Chest", position: "Shortened" },
+        { id: "cable_fly", name: "Cable Fly", muscle: "Chest", position: "Shortened" },
+        { id: "low_cable_fly", name: "Low-to-High Cable Fly", muscle: "Upper Chest", position: "Shortened" },
+        { id: "high_cable_fly", name: "High-to-Low Cable Fly", muscle: "Lower Chest", position: "Shortened" },
+        { id: "db_fly", name: "Dumbbell Fly", muscle: "Chest", position: "Shortened" },
+        { id: "incline_fly", name: "Incline Dumbbell Fly", muscle: "Upper Chest", position: "Shortened" },
+        { id: "svend_press", name: "Svend Press", muscle: "Chest", position: "Shortened" },
+      ],
+      back_lengthened: [
+        { id: "chinup", name: "Chin-Up", muscle: "Back", position: "Lengthened" },
+        { id: "pullup", name: "Pull-Up", muscle: "Back", position: "Lengthened" },
+        { id: "lat_pulldown", name: "Lat Pulldown", muscle: "Back", position: "Lengthened" },
+        { id: "wide_pulldown", name: "Wide-Grip Pulldown", muscle: "Back", position: "Lengthened" },
+        { id: "close_pulldown", name: "Close-Grip Pulldown", muscle: "Back", position: "Lengthened" },
+        { id: "neutral_pullup", name: "Neutral-Grip Pull-Up", muscle: "Back", position: "Lengthened" },
+        { id: "weighted_pullup", name: "Weighted Pull-Up", muscle: "Back", position: "Lengthened" },
+        { id: "straight_arm_pd", name: "Straight-Arm Pulldown", muscle: "Lats", position: "Lengthened" },
+        { id: "cable_pullover", name: "Cable Pullover", muscle: "Lats", position: "Lengthened" },
+        { id: "machine_pulldown", name: "Machine Pulldown", muscle: "Back", position: "Lengthened" },
+      ],
+      back_shortened: [
+        { id: "seated_row", name: "Seated Cable Row", muscle: "Back", position: "Shortened" },
+        { id: "db_row", name: "Dumbbell Row", muscle: "Back", position: "Shortened" },
+        { id: "barbell_row", name: "Barbell Row", muscle: "Back", position: "Shortened" },
+        { id: "tbar_row", name: "T-Bar Row", muscle: "Back", position: "Shortened" },
+        { id: "chest_supported_row", name: "Chest-Supported Row", muscle: "Back", position: "Shortened" },
+        { id: "pendlay_row", name: "Pendlay Row", muscle: "Back", position: "Shortened" },
+        { id: "meadows_row", name: "Meadows Row", muscle: "Back", position: "Shortened" },
+        { id: "machine_row", name: "Machine Row", muscle: "Back", position: "Shortened" },
+        { id: "seal_row", name: "Seal Row", muscle: "Back", position: "Shortened" },
+        { id: "kroc_row", name: "Kroc Row", muscle: "Back", position: "Shortened" },
+        { id: "helms_row", name: "Helms Row", muscle: "Back", position: "Shortened" },
+      ],
+      shoulder_lengthened: [
+        { id: "shoulder_press", name: "Barbell OHP", muscle: "Shoulders", position: "Lengthened" },
+        { id: "db_ohp", name: "Dumbbell OHP", muscle: "Shoulders", position: "Lengthened" },
+        { id: "arnold_press", name: "Arnold Press", muscle: "Shoulders", position: "Lengthened" },
+        { id: "seated_db_press", name: "Seated DB Press", muscle: "Shoulders", position: "Lengthened" },
+        { id: "smith_ohp", name: "Smith Machine OHP", muscle: "Shoulders", position: "Lengthened" },
+        { id: "machine_shoulder", name: "Machine Shoulder Press", muscle: "Shoulders", position: "Lengthened" },
+        { id: "landmine_shoulder", name: "Landmine Shoulder Press", muscle: "Shoulders", position: "Lengthened" },
+        { id: "push_press", name: "Push Press", muscle: "Shoulders", position: "Lengthened" },
+      ],
+      shoulder_shortened: [
+        { id: "lateral_raise", name: "Dumbbell Lateral Raise", muscle: "Side Delts", position: "Shortened" },
+        { id: "cable_lateral", name: "Cable Lateral Raise", muscle: "Side Delts", position: "Shortened" },
+        { id: "machine_lateral", name: "Machine Lateral Raise", muscle: "Side Delts", position: "Shortened" },
+        { id: "leaning_lateral", name: "Leaning Cable Lateral", muscle: "Side Delts", position: "Shortened" },
+        { id: "lu_raise", name: "Lu Raise", muscle: "Side Delts", position: "Shortened" },
+        { id: "upright_row", name: "Upright Row", muscle: "Side Delts", position: "Shortened" },
+        { id: "cable_upright_row", name: "Cable Upright Row", muscle: "Side Delts", position: "Shortened" },
+      ],
+      rear_delt: [
+        { id: "rear_delt_fly", name: "Rear Delt Fly (DB)", muscle: "Rear Delts", position: "Shortened" },
+        { id: "face_pull", name: "Face Pull", muscle: "Rear Delts", position: "Shortened" },
+        { id: "reverse_fly", name: "Reverse Fly Machine", muscle: "Rear Delts", position: "Shortened" },
+        { id: "cable_rear_fly", name: "Cable Rear Delt Fly", muscle: "Rear Delts", position: "Shortened" },
+        { id: "band_pull_apart", name: "Band Pull-Apart", muscle: "Rear Delts", position: "Shortened" },
+        { id: "prone_y_raise", name: "Prone Y-Raise", muscle: "Rear Delts", position: "Shortened" },
+        { id: "wide_row_rear", name: "Wide-Grip Row (rear focus)", muscle: "Rear Delts", position: "Shortened" },
+      ],
+      bicep_lengthened: [
+        { id: "incline_curl", name: "Incline Dumbbell Curl", muscle: "Biceps", position: "Lengthened" },
+        { id: "bayesian_curl", name: "Bayesian Cable Curl", muscle: "Biceps", position: "Lengthened" },
+        { id: "overhead_cable_curl", name: "Overhead Cable Curl", muscle: "Biceps", position: "Lengthened" },
+        { id: "drag_curl", name: "Drag Curl", muscle: "Biceps", position: "Lengthened" },
+        { id: "behind_body_curl", name: "Behind-Body Cable Curl", muscle: "Biceps", position: "Lengthened" },
+      ],
+      bicep_shortened: [
+        { id: "db_curl", name: "Dumbbell Curl", muscle: "Biceps", position: "Shortened" },
+        { id: "barbell_curl", name: "Barbell Curl", muscle: "Biceps", position: "Shortened" },
+        { id: "preacher_curl", name: "Preacher Curl", muscle: "Biceps", position: "Shortened" },
+        { id: "hammer_curl", name: "Hammer Curl", muscle: "Biceps", position: "Shortened" },
+        { id: "ez_bar_curl", name: "EZ-Bar Curl", muscle: "Biceps", position: "Shortened" },
+        { id: "concentration_curl", name: "Concentration Curl", muscle: "Biceps", position: "Shortened" },
+        { id: "spider_curl", name: "Spider Curl", muscle: "Biceps", position: "Shortened" },
+        { id: "machine_curl", name: "Machine Curl", muscle: "Biceps", position: "Shortened" },
+        { id: "cable_curl", name: "Cable Curl", muscle: "Biceps", position: "Shortened" },
+        { id: "reverse_curl", name: "Reverse Curl", muscle: "Forearms/Biceps", position: "Shortened" },
+        { id: "cross_body_curl", name: "Cross-Body Hammer Curl", muscle: "Biceps", position: "Shortened" },
+        { id: "zottman_curl", name: "Zottman Curl", muscle: "Biceps", position: "Shortened" },
+      ],
+      tricep_lengthened: [
+        { id: "overhead_ext", name: "Overhead Cable Extension", muscle: "Triceps", position: "Lengthened" },
+        { id: "skull_crusher", name: "Skull Crusher", muscle: "Triceps", position: "Lengthened" },
+        { id: "db_overhead_ext", name: "DB Overhead Extension", muscle: "Triceps", position: "Lengthened" },
+        { id: "incline_skull", name: "Incline Skull Crusher", muscle: "Triceps", position: "Lengthened" },
+        { id: "french_press", name: "French Press", muscle: "Triceps", position: "Lengthened" },
+        { id: "behind_head_ext", name: "Behind-Head Cable Ext", muscle: "Triceps", position: "Lengthened" },
+      ],
+      tricep_shortened: [
+        { id: "tricep_dip", name: "Tricep Dip", muscle: "Triceps", position: "Shortened" },
+        { id: "tricep_pushdown", name: "Tricep Pushdown", muscle: "Triceps", position: "Shortened" },
+        { id: "close_grip_bench", name: "Close-Grip Bench", muscle: "Triceps", position: "Shortened" },
+        { id: "rope_pushdown", name: "Rope Pushdown", muscle: "Triceps", position: "Shortened" },
+        { id: "vbar_pushdown", name: "V-Bar Pushdown", muscle: "Triceps", position: "Shortened" },
+        { id: "kickback", name: "Tricep Kickback", muscle: "Triceps", position: "Shortened" },
+        { id: "cable_kickback", name: "Cable Kickback", muscle: "Triceps", position: "Shortened" },
+        { id: "diamond_pushup", name: "Diamond Push-Up", muscle: "Triceps", position: "Shortened" },
+        { id: "bench_dip", name: "Bench Dip", muscle: "Triceps", position: "Shortened" },
+        { id: "machine_dip", name: "Machine Dip", muscle: "Triceps", position: "Shortened" },
+      ],
+      zone2: [
+        { id: "jog", name: "Jogging" }, { id: "cycle", name: "Cycling" }, { id: "row_cardio", name: "Rowing" },
+        { id: "swim", name: "Swimming" }, { id: "hike", name: "Hiking" }, { id: "elliptical", name: "Elliptical" },
+      ],
+      moderate_cardio: [
+        { id: "run", name: "Running" }, { id: "row_mod", name: "Rowing" }, { id: "cycle_mod", name: "Cycling" },
+        { id: "jump_rope", name: "Jump Rope" }, { id: "stair_climb", name: "Stair Climb" }, { id: "jacks", name: "Jumping Jacks" },
+      ],
+      hiit: [
+        { id: "assault_bike", name: "Assault Bike" }, { id: "sprint", name: "Sprint/Jog Intervals" },
+        { id: "row_hiit", name: "Rowing Intervals" }, { id: "ski_erg", name: "Ski Erg" }, { id: "sand_sprint", name: "Sand Sprints" },
+      ],
+    };
+
+    const findExercise = (id) => {
+      for (const group of Object.values(EXERCISE_DB)) {
+        const ex = group.find((e) => e.id === id);
+        if (ex) return ex;
+      }
+      return { id, name: id, muscle: "—" };
+    };
+
+    /* ══════════════════════════════════════════════════════════
+       PROGRAM DAYS
+       ══════════════════════════════════════════════════════════ */
+    const DAYS = [
+      { key: "day1_endurance", dayNum: 1, weekday: "Sunday", title: "Long Endurance", subtitle: "Zone 2 Cardio", type: DAY_TYPES.cardio, emoji: "🏃", color: "#22c55e", description: "60-75 min Zone 2 cardio. Breathing faster than normal but able to hold a conversation. Emphasize nasal breathing.", defaultExercise: "jog", exercisePool: "zone2", targetMinutes: 65 },
+      { key: "day2_legs", dayNum: 2, weekday: "Monday", title: "Legs", subtitle: "Resistance Training", type: DAY_TYPES.lifting, emoji: "🦵", color: "#e85d04", description: "10 min warmup + 50-60 min training.", exercisePairs: [
+        { label: "Quads", lengthened: "quad_lengthened", shortened: "quad_shortened", defaultL: "leg_ext", defaultS: "hack_squat" },
+        { label: "Hamstrings", lengthened: "ham_lengthened", shortened: "ham_shortened", defaultL: "leg_curl", defaultS: "glute_ham_raise" },
+        { label: "Calves", lengthened: "calf_lengthened", shortened: "calf_shortened", defaultL: "standing_calf", defaultS: "seated_calf" },
+      ]},
+      { key: "day4_torso", dayNum: 4, weekday: "Wednesday", title: "Chest & Back", subtitle: "Push/Pull Training", type: DAY_TYPES.lifting, emoji: "💪", color: "#3b82f6", description: "10 min warmup + 50-60 min training. Focused chest and back work.", exercisePairs: [
+        { label: "Chest", lengthened: "chest_lengthened", shortened: "chest_shortened", defaultL: "incline_press", defaultS: "cable_crossover" },
+        { label: "Back", lengthened: "back_lengthened", shortened: "back_shortened", defaultL: "chinup", defaultS: "seated_row" },
+      ]},
+      { key: "day5_cardio", dayNum: 5, weekday: "Thursday", title: "Cardiovascular", subtitle: "Moderate Intensity", type: DAY_TYPES.cardio, emoji: "❤️", color: "#ef4444", description: "35 minutes at 75-80% max effort. Ideally done outside.", defaultExercise: "run", exercisePool: "moderate_cardio", targetMinutes: 35 },
+      { key: "day6_hiit", dayNum: 6, weekday: "Friday", title: "HIIT", subtitle: "High Intensity Intervals", type: DAY_TYPES.hiit, emoji: "⚡", color: "#eab308", description: "20-60 sec all-out sprint + 10 sec rest × 8-12 rounds. Max HR = 220 − your age.", defaultExercise: "assault_bike", exercisePool: "hiit", targetRounds: 10 },
+      { key: "day7_arms", dayNum: 7, weekday: "Saturday", title: "Arms & Shoulders", subtitle: "Resistance Training", type: DAY_TYPES.lifting, emoji: "🏋️", color: "#a855f7", description: "10 min warmup + 50-60 min. Shoulders, biceps, triceps, and dips.", exercisePairs: [
+        { label: "Shoulders (Press)", single: "shoulder_lengthened", default: "shoulder_press" },
+        { label: "Shoulders (Lateral)", single: "shoulder_shortened", default: "lateral_raise" },
+        { label: "Biceps 1", single: "bicep_lengthened", default: "incline_curl" },
+        { label: "Biceps 2", single: "bicep_shortened", default: "barbell_curl" },
+        { label: "Triceps 1", single: "tricep_lengthened", default: "overhead_ext" },
+        { label: "Triceps 2", single: "tricep_shortened", default: "tricep_dip" },
+      ]},
+    ];
+
+    /* ══════════════════════════════════════════════════════════
+       MAIN APP
+       ══════════════════════════════════════════════════════════ */
+    function App() {
+      const [screen, setScreen] = useState("home");
+      const [meso, setMeso] = useState(() => loadData(SKEYS.meso) || { number: 1, week: 1 });
+      const [workoutLog, setWorkoutLog] = useState(() => loadData(SKEYS.log) || []);
+      const [scheduleOverride, setScheduleOverride] = useState(() => loadData(SKEYS.schedule));
+      const [completedThisWeek, setCompletedThisWeek] = useState(() => {
+        const log = loadData(SKEYS.log) || [];
+        const m = loadData(SKEYS.meso) || { number: 1, week: 1 };
+        const done = {};
+        log.forEach(w => { if (w.mesoNumber === m.number && w.mesoWeek === m.week) done[w.dayKey] = true; });
+        return done;
+      });
+
+      const buildDefaultChoices = () => {
+        const choices = {};
+        DAYS.filter(d => d.type === DAY_TYPES.lifting).forEach(day => {
+          choices[day.key] = day.exercisePairs.map(pair => {
+            if (pair.single) return { label: pair.label, exercises: [pair.default] };
+            return { label: pair.label, exercises: [pair.defaultL, pair.defaultS] };
+          });
+        });
+        return choices;
+      };
+
+      const [programChoices, setProgramChoices] = useState(() => loadData(SKEYS.program) || buildDefaultChoices());
+      const [logDay, setLogDay] = useState(null);
+      const [logDate, setLogDate] = useState(new Date().toISOString().split("T")[0]);
+      const [logData, setLogData] = useState(null);
+      const [logNotes, setLogNotes] = useState("");
+      const [swapCtx, setSwapCtx] = useState(null);
+      const [selectedExProgress, setSelectedExProgress] = useState(null);
+
+      const autoSchedule = meso.number % 2 === 1 ? SCHEDULE_A : SCHEDULE_B;
+      const schedule = scheduleOverride === "A" ? SCHEDULE_A : scheduleOverride === "B" ? SCHEDULE_B : autoSchedule;
+      const isDeload = meso.week === DELOAD_WEEK;
+
+      // Persist
+      useEffect(() => { saveData(SKEYS.log, workoutLog); }, [workoutLog]);
+      useEffect(() => { saveData(SKEYS.meso, meso); }, [meso]);
+      useEffect(() => { saveData(SKEYS.schedule, scheduleOverride); }, [scheduleOverride]);
+      useEffect(() => { saveData(SKEYS.program, programChoices); }, [programChoices]);
+
+      const startLog = (day) => {
+        setLogDay(day); setLogDate(new Date().toISOString().split("T")[0]); setLogNotes("");
+        if (day.type === DAY_TYPES.lifting) {
+          const pairs = programChoices?.[day.key] || [];
+          const entries = [];
+          pairs.forEach(pair => {
+            pair.exercises.forEach(exId => {
+              const rx = getPrescription(schedule, schedule.sets, meso.week);
+              const lastLog = [...workoutLog].reverse().find(w => w.dayKey === day.key);
+              const lastEx = lastLog?.exercises?.find(e => e.exerciseId === exId);
+              let suggestedWeight = ""; let autoNote = null;
+              if (lastEx && lastEx.sets.length > 0) {
+                const valid = lastEx.sets.filter(s => s.weight !== "" && s.weight !== undefined);
+                if (valid.length > 0) {
+                  const avgW = valid.reduce((a, s) => a + parseFloat(s.weight), 0) / valid.length;
+                  const avgRIR = valid.reduce((a, s) => a + (parseFloat(s.rir) ?? 3), 0) / valid.length;
+                  suggestedWeight = Math.round(avgW);
+                  if (avgRIR < rx.rir - 1.5) autoNote = "Last session was tough — consider lowering weight";
+                  else if (avgRIR > rx.rir + 1) autoNote = "You had gas left — try adding 2.5-5 lbs";
+                  else if (avgRIR <= rx.rir) autoNote = "Progressing well — try adding 2.5-5 lbs";
+                }
+              }
+              entries.push({ exerciseId: exId, pairLabel: pair.label, targetSets: rx.sets, targetReps: rx.reps, targetRIR: rx.rir, autoNote, sets: Array.from({ length: rx.sets }, () => ({ weight: suggestedWeight, reps: rx.reps, rir: rx.rir })) });
+            });
+          });
+          setLogData({ type: "lifting", entries });
+        } else if (day.type === DAY_TYPES.cardio) {
+          setLogData({ type: "cardio", exerciseId: day.defaultExercise, duration: day.targetMinutes, intensity: day.key === "day1_endurance" ? "Zone 2" : "75-80%", heartRateAvg: "", notes: "" });
+        } else if (day.type === DAY_TYPES.hiit) {
+          setLogData({ type: "hiit", exerciseId: day.defaultExercise, rounds: day.targetRounds, sprintDuration: 30, restDuration: 10, notes: "" });
+        }
+        setScreen("log_entry");
+      };
+
+      const saveLog = () => {
+        const entry = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), dayKey: logDay.key, dayTitle: logDay.title, dayType: logDay.type, date: logDate, mesoNumber: meso.number, mesoWeek: meso.week, schedule: schedule.id, notes: logNotes, data: logData,
+          exercises: logData.type === "lifting" ? logData.entries.map(e => ({ exerciseId: e.exerciseId, sets: e.sets.filter(s => s.weight !== "" && s.weight !== undefined && s.weight !== 0) })) : [] };
+        setWorkoutLog(prev => [...prev, entry]);
+        setCompletedThisWeek(prev => ({ ...prev, [logDay.key]: true }));
+        setLogDay(null); setLogData(null); setScreen("home");
+      };
+
+      const advanceWeek = () => {
+        if (meso.week >= MESO_WEEKS) setMeso({ number: meso.number + 1, week: 1 });
+        else setMeso({ ...meso, week: meso.week + 1 });
+        setCompletedThisWeek({});
+      };
+
+      const progressData = useMemo(() => {
+        const volumeByWeek = {}; const loadByExercise = {}; const cardioLog = [];
+        workoutLog.forEach(w => {
+          const wk = `M${w.mesoNumber}W${w.mesoWeek}`;
+          if (!volumeByWeek[wk]) volumeByWeek[wk] = { week: wk, sets: 0, volume: 0 };
+          if (w.exercises) w.exercises.forEach(ex => {
+            const valid = (ex.sets || []).filter(s => s.weight !== "" && s.weight !== undefined);
+            volumeByWeek[wk].sets += valid.length;
+            volumeByWeek[wk].volume += valid.reduce((a, s) => a + (parseFloat(s.weight) || 0) * (parseInt(s.reps) || 0), 0);
+            if (!loadByExercise[ex.exerciseId]) loadByExercise[ex.exerciseId] = [];
+            if (valid.length > 0) { const avgW = valid.reduce((a, s) => a + parseFloat(s.weight), 0) / valid.length; loadByExercise[ex.exerciseId].push({ date: new Date(w.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }), weight: Math.round(avgW * 10) / 10 }); }
+          });
+          if (w.dayType === "cardio" && w.data) cardioLog.push({ date: new Date(w.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }), minutes: w.data.duration || 0, type: w.dayTitle });
+        });
+        return { volume: Object.values(volumeByWeek), loads: loadByExercise, cardio: cardioLog };
+      }, [workoutLog]);
+
+      // ─── STYLES ───
+      const C = { bg: "#060609", surface: "#0e0e14", card: "#141420", border: "#222235", borderLight: "#2d2d42", accent: "#e85d04", accentSoft: "rgba(232,93,4,0.08)", accentBorder: "rgba(232,93,4,0.2)", green: "#22c55e", greenSoft: "rgba(34,197,94,0.08)", blue: "#3b82f6", blueSoft: "rgba(59,130,246,0.08)", purple: "#a855f7", purpleSoft: "rgba(168,85,247,0.08)", yellow: "#eab308", yellowSoft: "rgba(234,179,8,0.08)", red: "#ef4444", redSoft: "rgba(239,68,68,0.08)", cyan: "#06b6d4", text: "#eeeef5", text2: "#8888a0", text3: "#555570" };
+      const font = "'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif";
+      const rirColor = (r) => { const v = parseFloat(r); if (isNaN(v)) return C.text3; if (v >= 4) return C.blue; if (v >= 3) return C.green; if (v >= 2) return C.yellow; if (v >= 1) return C.accent; return C.red; };
+      const rirBg = (r) => { const v = parseFloat(r); if (isNaN(v)) return C.border; if (v >= 4) return C.blueSoft; if (v >= 3) return C.greenSoft; if (v >= 2) return C.yellowSoft; if (v >= 1) return C.accentSoft; return C.redSoft; };
+
+      // ─── Components ───
+      const Page = ({ children, title, sub, onBack }) => React.createElement("div", { style: { minHeight: "100dvh", background: C.bg, fontFamily: font, color: C.text } },
+        React.createElement("div", { style: { padding: "14px 16px 0", display: "flex", alignItems: "center", gap: 10 } },
+          onBack && React.createElement("button", { onClick: onBack, style: { background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center", color: C.text2, cursor: "pointer", fontSize: 16 } }, "←"),
+          React.createElement("div", { style: { flex: 1 } },
+            sub && React.createElement("div", { style: { fontSize: 10, color: C.text3, textTransform: "uppercase", letterSpacing: 1.5 } }, sub),
+            React.createElement("h1", { style: { margin: 0, fontSize: 20, fontWeight: 700 } }, title)
+          )
+        ),
+        React.createElement("div", { style: { padding: "12px 16px 100px" } }, children)
+      );
+
+      const Cd = ({ children, style, onClick }) => React.createElement("div", { onClick, style: { background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 14, marginBottom: 10, cursor: onClick ? "pointer" : "default", ...style } }, children);
+
+      const Btn = ({ children, color, style, ...p }) => React.createElement("button", { ...p, style: { padding: "12px 20px", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: font, width: "100%", background: color || C.accent, color: "#fff", border: "none", ...style } }, children);
+
+      const Inp = ({ label, ...p }) => React.createElement("div", { style: { marginBottom: 10 } },
+        label && React.createElement("label", { style: { fontSize: 11, color: C.text3, display: "block", marginBottom: 3 } }, label),
+        React.createElement("input", { ...p, style: { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, padding: "10px", fontSize: 14, fontFamily: font, width: "100%", boxSizing: "border-box", textAlign: "center", fontWeight: 600, ...(p.style || {}) } })
+      );
+
+      // ─── HOME ───
+      const renderHome = () => {
+        const allDone = DAYS.every(d => completedThisWeek[d.key]);
+        const doneCount = DAYS.filter(d => completedThisWeek[d.key]).length;
+        return React.createElement(Page, { title: React.createElement(React.Fragment, null, "FITNESS ", React.createElement("span", { style: { color: C.accent } }, "FOUNDATION")), sub: "Foundational Fitness Protocol" },
+          React.createElement(Cd, { style: { background: `linear-gradient(135deg, ${C.card}, ${C.surface})`, borderColor: C.borderLight } },
+            React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 12 } },
+              React.createElement("div", null,
+                React.createElement("div", { style: { fontSize: 10, color: C.text3, textTransform: "uppercase", letterSpacing: 1.2 } }, `Mesocycle ${meso.number} · ${schedule.label}`),
+                React.createElement("div", { style: { fontSize: 18, fontWeight: 700, marginTop: 2 } }, isDeload ? "🔄 Deload Week" : `Week ${meso.week} of ${MESO_WEEKS - 1}`)
+              ),
+              React.createElement("div", { style: { display: "flex", gap: 6 } },
+                React.createElement("div", { style: { background: C.accentSoft, color: C.accent, padding: "4px 10px", borderRadius: 16, fontSize: 11, fontWeight: 700 } }, schedule.repRange),
+                React.createElement("div", { style: { background: isDeload ? C.blueSoft : C.greenSoft, color: isDeload ? C.blue : C.green, padding: "4px 10px", borderRadius: 16, fontSize: 11, fontWeight: 700 } }, `RIR ${getPrescription(schedule, 3, meso.week).rir}`)
+              )
+            ),
+            React.createElement("div", { style: { display: "flex", gap: 4, marginBottom: 10 } },
+              Array.from({ length: MESO_WEEKS }, (_, i) => {
+                const wk = i + 1; const isActive = wk === meso.week;
+                return React.createElement("button", { key: i, onClick: () => { setMeso({ ...meso, week: wk }); setCompletedThisWeek({}); }, style: { flex: 1, height: 28, borderRadius: 6, border: `1px solid ${isActive ? C.accent : C.border}`, background: isActive ? C.accent : wk < meso.week ? C.accentSoft : C.surface, color: isActive ? "#fff" : wk < meso.week ? C.accent : C.text3, fontSize: 10, fontWeight: isActive ? 700 : 400, cursor: "pointer", fontFamily: font, display: "flex", alignItems: "center", justifyContent: "center" } }, wk === MESO_WEEKS ? "DL" : `W${wk}`);
+              })
+            ),
+            React.createElement("div", { style: { fontSize: 11, color: C.text3 } }, `${doneCount}/${DAYS.length} sessions logged this week`, isDeload && " · Reduced volume — recover and grow"),
+            React.createElement("div", { style: { marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.border}` } },
+              React.createElement("div", { style: { fontSize: 10, color: C.text3, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 } }, "Schedule"),
+              React.createElement("div", { style: { display: "flex", gap: 6 } },
+                [{ val: null, label: "Auto" }, { val: "A", label: "A — Strength" }, { val: "B", label: "B — Hypertrophy" }].map(opt => {
+                  const active = scheduleOverride === opt.val;
+                  return React.createElement("button", { key: String(opt.val), onClick: () => setScheduleOverride(opt.val), style: { flex: 1, background: active ? C.accentSoft : C.surface, border: `1px solid ${active ? C.accentBorder : C.border}`, borderRadius: 10, padding: "8px 4px", cursor: "pointer", fontFamily: font, color: active ? C.accent : C.text2, fontSize: 11, fontWeight: active ? 700 : 400, textAlign: "center" } }, opt.label);
+                })
+              )
+            )
+          ),
+          DAYS.map(day => {
+            const done = completedThisWeek[day.key];
+            return React.createElement(Cd, { key: day.key, onClick: done ? undefined : () => startLog(day), style: { cursor: done ? "default" : "pointer", opacity: done ? 0.7 : 1 } },
+              React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
+                React.createElement("div", { style: { width: 44, height: 44, borderRadius: 11, fontSize: 20, background: done ? C.greenSoft : `${day.color}10`, border: `1px solid ${done ? C.green + "25" : day.color + "20"}`, display: "flex", alignItems: "center", justifyContent: "center", color: done ? C.green : day.color } }, done ? "✓" : day.emoji),
+                React.createElement("div", { style: { flex: 1 } },
+                  React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
+                    React.createElement("span", { style: { fontWeight: 700, fontSize: 14, color: done ? C.green : C.text } }, day.title),
+                    React.createElement("span", { style: { fontSize: 10, color: C.text3, background: C.surface, padding: "2px 6px", borderRadius: 4 } }, day.weekday)
+                  ),
+                  React.createElement("div", { style: { fontSize: 11, color: C.text3, marginTop: 1 } }, day.subtitle)
+                ),
+                !done && React.createElement("div", { style: { color: day.color, fontSize: 12, fontWeight: 600 } }, "Log →")
+              )
+            );
+          }),
+          allDone ? React.createElement(Cd, { style: { background: C.accentSoft, borderColor: C.accentBorder, textAlign: "center" } },
+            React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: C.accent, marginBottom: 8 } }, `All ${DAYS.length} sessions logged!`),
+            React.createElement(Btn, { onClick: advanceWeek }, meso.week >= MESO_WEEKS ? `Start Mesocycle ${meso.number + 1} →` : `Advance to Week ${meso.week + 1} →`)
+          ) : doneCount > 0 && React.createElement("div", { style: { textAlign: "center", marginTop: 6 } },
+            React.createElement("button", { onClick: advanceWeek, style: { background: "none", border: "none", color: C.text3, fontSize: 11, cursor: "pointer", fontFamily: font, textDecoration: "underline" } }, "Skip to next week")
+          )
+        );
+      };
+
+      // ─── LOG ENTRY ───
+      const renderLogEntry = () => {
+        if (!logDay || !logData) return null;
+        const updateLiftSet = (exIdx, setIdx, field, val) => { setLogData(prev => { const entries = [...prev.entries]; entries[exIdx] = { ...entries[exIdx], sets: [...entries[exIdx].sets] }; entries[exIdx].sets[setIdx] = { ...entries[exIdx].sets[setIdx], [field]: val }; return { ...prev, entries }; }); };
+        const addLiftSet = (exIdx) => { setLogData(prev => { const entries = [...prev.entries]; const last = entries[exIdx].sets[entries[exIdx].sets.length - 1]; entries[exIdx] = { ...entries[exIdx], sets: [...entries[exIdx].sets, { weight: last?.weight || "", reps: entries[exIdx].targetReps, rir: entries[exIdx].targetRIR }] }; return { ...prev, entries }; }); };
+        const removeLiftSet = (exIdx) => { setLogData(prev => { const entries = [...prev.entries]; if (entries[exIdx].sets.length > 1) entries[exIdx] = { ...entries[exIdx], sets: entries[exIdx].sets.slice(0, -1) }; return { ...prev, entries }; }); };
+        const hasData = logData.type === "lifting" ? logData.entries.some(e => e.sets.some(s => s.weight !== "" && s.weight !== 0)) : true;
+
+        return React.createElement(Page, { title: logDay.title, sub: `${logDay.weekday} · ${isDeload ? "Deload" : `Week ${meso.week}`} · Schedule ${schedule.id}`, onBack: () => { setScreen("home"); setLogDay(null); } },
+          React.createElement(Inp, { label: "Workout Date", type: "date", value: logDate, onChange: e => setLogDate(e.target.value), style: { textAlign: "left" } }),
+          React.createElement(Cd, { style: { background: `${logDay.color}08`, borderColor: `${logDay.color}18`, marginBottom: 14 } }, React.createElement("div", { style: { fontSize: 12, color: C.text2, lineHeight: 1.5 } }, logDay.description)),
+
+          logData.type === "lifting" && React.createElement(React.Fragment, null,
+            logData.entries.some(e => e.autoNote) && React.createElement(Cd, { style: { background: C.yellowSoft, borderColor: C.yellow + "20", marginBottom: 14 } },
+              React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: C.yellow, marginBottom: 4 } }, "💡 Auto-Regulation"),
+              logData.entries.filter(e => e.autoNote).map((e, i) => React.createElement("div", { key: i, style: { fontSize: 11, color: C.text2, marginBottom: 2 } }, React.createElement("span", { style: { fontWeight: 600, color: C.text } }, findExercise(e.exerciseId).name + ": "), e.autoNote))
+            ),
+            logData.entries.map((entry, exIdx) => {
+              const info = findExercise(entry.exerciseId);
+              return React.createElement(Cd, { key: exIdx, style: { marginBottom: 14 } },
+                React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 10 } },
+                  React.createElement("div", null,
+                    React.createElement("div", { style: { fontSize: 10, color: C.text3, textTransform: "uppercase", letterSpacing: 1 } }, `${entry.pairLabel} · ${info.position || ""}`),
+                    React.createElement("div", { style: { fontWeight: 700, fontSize: 14, marginTop: 1 } }, info.name),
+                    React.createElement("div", { style: { fontSize: 11, color: C.text3, marginTop: 1 } }, `Target: ${entry.targetSets}×${entry.targetReps} @ RIR ${entry.targetRIR}`)
+                  ),
+                  React.createElement("button", { onClick: () => { let pool = null; for (const [key, exs] of Object.entries(EXERCISE_DB)) { if (exs.find(e => e.id === entry.exerciseId)) { pool = key; break; } } setSwapCtx({ dayKey: logDay.key, exIdx, pool, currentId: entry.exerciseId }); setScreen("swap"); }, style: { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text3, fontSize: 10, padding: "4px 8px", cursor: "pointer", fontFamily: font } }, "Swap")
+                ),
+                React.createElement("div", { style: { display: "grid", gridTemplateColumns: "28px 1fr 1fr 1fr", gap: 5, marginBottom: 4 } },
+                  React.createElement("div", { style: { fontSize: 9, color: C.text3, textAlign: "center" } }, "Set"),
+                  React.createElement("div", { style: { fontSize: 9, color: C.text3, textAlign: "center" } }, "lbs"),
+                  React.createElement("div", { style: { fontSize: 9, color: C.text3, textAlign: "center" } }, "Reps"),
+                  React.createElement("div", { style: { fontSize: 9, color: C.text3, textAlign: "center" } }, "RIR")
+                ),
+                entry.sets.map((set, sIdx) => React.createElement("div", { key: sIdx, style: { display: "grid", gridTemplateColumns: "28px 1fr 1fr 1fr", gap: 5, marginBottom: 5, alignItems: "center" } },
+                  React.createElement("div", { style: { fontSize: 12, color: C.text3, textAlign: "center", fontWeight: 600 } }, sIdx + 1),
+                  React.createElement("input", { type: "number", inputMode: "decimal", placeholder: "—", value: set.weight, onChange: e => updateLiftSet(exIdx, sIdx, "weight", e.target.value), style: { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 7, color: C.text, padding: "9px 6px", fontSize: 14, textAlign: "center", fontFamily: font, width: "100%", boxSizing: "border-box", fontWeight: 600 } }),
+                  React.createElement("input", { type: "number", inputMode: "numeric", value: set.reps, onChange: e => updateLiftSet(exIdx, sIdx, "reps", parseInt(e.target.value) || 0), style: { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 7, color: C.text, padding: "9px 6px", fontSize: 14, textAlign: "center", fontFamily: font, width: "100%", boxSizing: "border-box" } }),
+                  React.createElement("select", { value: set.rir, onChange: e => updateLiftSet(exIdx, sIdx, "rir", parseInt(e.target.value)), style: { background: rirBg(set.rir), border: `1px solid ${rirColor(set.rir)}30`, borderRadius: 7, color: rirColor(set.rir), padding: "9px 2px", fontSize: 13, fontFamily: font, textAlign: "center", width: "100%", boxSizing: "border-box", fontWeight: 600, WebkitAppearance: "none" } },
+                    [0, 1, 2, 3, 4, 5].map(r => React.createElement("option", { key: r, value: r }, r)))
+                )),
+                React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 6 } },
+                  React.createElement("button", { onClick: () => addLiftSet(exIdx), style: { flex: 1, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 7, color: C.text2, padding: "7px", fontSize: 11, cursor: "pointer", fontFamily: font } }, "+ Set"),
+                  entry.sets.length > 1 && React.createElement("button", { onClick: () => removeLiftSet(exIdx), style: { flex: 1, background: C.redSoft, border: `1px solid ${C.red}15`, borderRadius: 7, color: C.red, padding: "7px", fontSize: 11, cursor: "pointer", fontFamily: font } }, "− Set")
+                )
+              );
+            })
+          ),
+
+          logData.type === "cardio" && React.createElement(Cd, null,
+            React.createElement("div", { style: { fontSize: 13, fontWeight: 700, marginBottom: 10 } }, "Cardio Session"),
+            React.createElement("div", { style: { marginBottom: 8 } },
+              React.createElement("label", { style: { fontSize: 11, color: C.text3, marginBottom: 3, display: "block" } }, "Activity"),
+              React.createElement("select", { value: logData.exerciseId, onChange: e => setLogData({ ...logData, exerciseId: e.target.value }), style: { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, padding: "10px", fontSize: 14, fontFamily: font, width: "100%", boxSizing: "border-box" } },
+                (EXERCISE_DB[logDay.exercisePool] || []).map(ex => React.createElement("option", { key: ex.id, value: ex.id }, ex.name)))
+            ),
+            React.createElement(Inp, { label: "Duration (minutes)", type: "number", inputMode: "numeric", value: logData.duration, onChange: e => setLogData({ ...logData, duration: parseInt(e.target.value) || 0 }) }),
+            React.createElement(Inp, { label: "Avg Heart Rate (optional)", type: "number", inputMode: "numeric", placeholder: "—", value: logData.heartRateAvg, onChange: e => setLogData({ ...logData, heartRateAvg: e.target.value }) }),
+            React.createElement("div", { style: { fontSize: 11, color: C.text3, marginTop: 4 } }, `Intensity target: ${logData.intensity}`)
+          ),
+
+          logData.type === "hiit" && React.createElement(Cd, null,
+            React.createElement("div", { style: { fontSize: 13, fontWeight: 700, marginBottom: 10 } }, "HIIT Session"),
+            React.createElement("div", { style: { marginBottom: 8 } },
+              React.createElement("label", { style: { fontSize: 11, color: C.text3, marginBottom: 3, display: "block" } }, "Exercise"),
+              React.createElement("select", { value: logData.exerciseId, onChange: e => setLogData({ ...logData, exerciseId: e.target.value }), style: { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, padding: "10px", fontSize: 14, fontFamily: font, width: "100%", boxSizing: "border-box" } },
+                EXERCISE_DB.hiit.map(ex => React.createElement("option", { key: ex.id, value: ex.id }, ex.name)))
+            ),
+            React.createElement(Inp, { label: "Rounds completed", type: "number", inputMode: "numeric", value: logData.rounds, onChange: e => setLogData({ ...logData, rounds: parseInt(e.target.value) || 0 }) }),
+            React.createElement(Inp, { label: "Sprint duration (sec)", type: "number", inputMode: "numeric", value: logData.sprintDuration, onChange: e => setLogData({ ...logData, sprintDuration: parseInt(e.target.value) || 0 }) }),
+            React.createElement(Inp, { label: "Rest duration (sec)", type: "number", inputMode: "numeric", value: logData.restDuration, onChange: e => setLogData({ ...logData, restDuration: parseInt(e.target.value) || 0 }) })
+          ),
+
+          React.createElement("div", { style: { marginBottom: 14 } },
+            React.createElement("label", { style: { fontSize: 11, color: C.text3, display: "block", marginBottom: 3 } }, "Session Notes (optional)"),
+            React.createElement("textarea", { value: logNotes, onChange: e => setLogNotes(e.target.value), placeholder: "How did you feel?", rows: 2, style: { background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, color: C.text, padding: "10px", fontSize: 12, fontFamily: font, width: "100%", boxSizing: "border-box", resize: "vertical" } })
+          ),
+          React.createElement(Btn, { onClick: saveLog, style: { opacity: hasData ? 1 : 0.4 }, color: logDay.color }, `Save ${logDay.title} Log ✓`)
+        );
+      };
+
+      // ─── SWAP ───
+      const renderSwap = () => {
+        if (!swapCtx) return null;
+        const pool = EXERCISE_DB[swapCtx.pool] || [];
+        return React.createElement(Page, { title: "Swap Exercise", sub: swapCtx.pool?.replace(/_/g, " "), onBack: () => { setSwapCtx(null); setScreen("log_entry"); } },
+          pool.map(ex => {
+            const isCurrent = ex.id === swapCtx.currentId;
+            return React.createElement(Cd, { key: ex.id, onClick: isCurrent ? undefined : () => {
+              setLogData(prev => { const entries = [...prev.entries]; entries[swapCtx.exIdx] = { ...entries[swapCtx.exIdx], exerciseId: ex.id }; return { ...prev, entries }; });
+              setProgramChoices(prev => { const updated = { ...prev, [swapCtx.dayKey]: [...prev[swapCtx.dayKey]] }; for (const pair of updated[swapCtx.dayKey]) { const idx = pair.exercises.indexOf(swapCtx.currentId); if (idx >= 0) { pair.exercises = [...pair.exercises]; pair.exercises[idx] = ex.id; break; } } return updated; });
+              setSwapCtx(null); setScreen("log_entry");
+            }, style: isCurrent ? { borderColor: C.accent, background: C.accentSoft } : {} },
+              React.createElement("div", { style: { fontWeight: 600, fontSize: 13, color: isCurrent ? C.accent : C.text } }, ex.name + (isCurrent ? " (current)" : "")),
+              ex.muscle && React.createElement("div", { style: { fontSize: 11, color: C.text3, marginTop: 1 } }, `${ex.muscle} · ${ex.position || ""}`)
+            );
+          })
+        );
+      };
+
+      // ─── HISTORY ───
+      const renderHistory = () => React.createElement(Page, { title: "History", sub: "All Sessions" },
+        workoutLog.length === 0 ? React.createElement(Cd, { style: { textAlign: "center", padding: 28 } }, React.createElement("div", { style: { fontSize: 28, marginBottom: 6 } }, "📋"), React.createElement("div", { style: { color: C.text3, fontSize: 13 } }, "No sessions logged yet.")) :
+        [...workoutLog].reverse().map(w => {
+          const dayDef = DAYS.find(d => d.key === w.dayKey);
+          const totalSets = (w.exercises || []).reduce((s, e) => s + (e.sets || []).length, 0);
+          const totalVol = (w.exercises || []).reduce((s, e) => s + (e.sets || []).reduce((a, set) => a + (parseFloat(set.weight) || 0) * (parseInt(set.reps) || 0), 0), 0);
+          return React.createElement(Cd, { key: w.id },
+            React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 6 } },
+              React.createElement("div", { style: { width: 36, height: 36, borderRadius: 9, background: `${dayDef?.color || C.accent}10`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 } }, dayDef?.emoji || "📝"),
+              React.createElement("div", { style: { flex: 1 } },
+                React.createElement("div", { style: { fontWeight: 700, fontSize: 14 } }, w.dayTitle || dayDef?.title),
+                React.createElement("div", { style: { fontSize: 10, color: C.text3 } }, `${new Date(w.date).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} · M${w.mesoNumber}W${w.mesoWeek} · Sched ${w.schedule || "—"}`)
+              )
+            ),
+            w.dayType === "lifting" && React.createElement("div", { style: { display: "flex", gap: 14, marginTop: 4 } },
+              React.createElement("div", null, React.createElement("div", { style: { fontSize: 16, fontWeight: 700, color: C.accent } }, totalSets), React.createElement("div", { style: { fontSize: 9, color: C.text3 } }, "Sets")),
+              React.createElement("div", null, React.createElement("div", { style: { fontSize: 16, fontWeight: 700, color: C.blue } }, Math.round(totalVol).toLocaleString()), React.createElement("div", { style: { fontSize: 9, color: C.text3 } }, "Volume"))
+            ),
+            w.dayType === "cardio" && w.data && React.createElement("div", { style: { fontSize: 12, color: C.text2, marginTop: 4 } }, `${(findExercise(w.data.exerciseId))?.name} · ${w.data.duration} min`),
+            w.dayType === "hiit" && w.data && React.createElement("div", { style: { fontSize: 12, color: C.text2, marginTop: 4 } }, `${(findExercise(w.data.exerciseId))?.name} · ${w.data.rounds} rounds × ${w.data.sprintDuration}s`),
+            w.notes && React.createElement("div", { style: { marginTop: 6, fontSize: 11, color: C.text3, fontStyle: "italic" } }, `"${w.notes}"`)
+          );
+        })
+      );
+
+      // ─── PROGRESS ───
+      const renderProgress = () => {
+        const exOpts = []; Object.entries(progressData.loads).forEach(([id, data]) => { if (data.length > 0) exOpts.push(findExercise(id)); });
+        return React.createElement(Page, { title: "Progress", sub: "Track Your Gains" },
+          progressData.volume.length > 0 ? React.createElement(React.Fragment, null,
+            React.createElement(Cd, null, React.createElement("div", { style: { fontSize: 13, fontWeight: 700, marginBottom: 10 } }, "Weekly Volume (Sets)"), React.createElement(ResponsiveContainer, { width: "100%", height: 160 }, React.createElement(BarChart, { data: progressData.volume }, React.createElement(CartesianGrid, { strokeDasharray: "3 3", stroke: C.border }), React.createElement(XAxis, { dataKey: "week", tick: { fontSize: 9, fill: C.text3 } }), React.createElement(YAxis, { tick: { fontSize: 9, fill: C.text3 } }), React.createElement(Tooltip, { contentStyle: { background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 11 } }), React.createElement(Bar, { dataKey: "sets", fill: C.accent, radius: [4, 4, 0, 0] })))),
+            React.createElement(Cd, null, React.createElement("div", { style: { fontSize: 13, fontWeight: 700, marginBottom: 10 } }, "Total Volume (lbs)"), React.createElement(ResponsiveContainer, { width: "100%", height: 160 }, React.createElement(AreaChart, { data: progressData.volume }, React.createElement(CartesianGrid, { strokeDasharray: "3 3", stroke: C.border }), React.createElement(XAxis, { dataKey: "week", tick: { fontSize: 9, fill: C.text3 } }), React.createElement(YAxis, { tick: { fontSize: 9, fill: C.text3 } }), React.createElement(Tooltip, { contentStyle: { background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 11 } }), React.createElement(Area, { type: "monotone", dataKey: "volume", stroke: C.blue, fill: C.blueSoft, strokeWidth: 2 })))),
+            exOpts.length > 0 && React.createElement(React.Fragment, null,
+              React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: C.text2, marginTop: 6, marginBottom: 8 } }, "Load by Exercise"),
+              React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 10 } }, exOpts.map(ex => React.createElement("button", { key: ex.id, onClick: () => setSelectedExProgress(selectedExProgress === ex.id ? null : ex.id), style: { background: selectedExProgress === ex.id ? C.accentSoft : C.card, border: `1px solid ${selectedExProgress === ex.id ? C.accentBorder : C.border}`, borderRadius: 16, padding: "5px 10px", fontSize: 11, color: selectedExProgress === ex.id ? C.accent : C.text2, cursor: "pointer", fontFamily: font, fontWeight: selectedExProgress === ex.id ? 600 : 400 } }, ex.name))),
+              selectedExProgress && progressData.loads[selectedExProgress] && React.createElement(Cd, null, React.createElement("div", { style: { fontSize: 13, fontWeight: 700, marginBottom: 10 } }, `${findExercise(selectedExProgress).name} — Avg lbs`), React.createElement(ResponsiveContainer, { width: "100%", height: 160 }, React.createElement(AreaChart, { data: progressData.loads[selectedExProgress] }, React.createElement(CartesianGrid, { strokeDasharray: "3 3", stroke: C.border }), React.createElement(XAxis, { dataKey: "date", tick: { fontSize: 9, fill: C.text3 } }), React.createElement(YAxis, { tick: { fontSize: 9, fill: C.text3 }, domain: ["dataMin - 5", "dataMax + 5"] }), React.createElement(Tooltip, { contentStyle: { background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 11 } }), React.createElement(Area, { type: "monotone", dataKey: "weight", stroke: C.purple, fill: C.purpleSoft, strokeWidth: 2 }))))
+            ),
+            progressData.cardio.length > 0 && React.createElement(Cd, null, React.createElement("div", { style: { fontSize: 13, fontWeight: 700, marginBottom: 10 } }, "Cardio (min)"), React.createElement(ResponsiveContainer, { width: "100%", height: 140 }, React.createElement(BarChart, { data: progressData.cardio }, React.createElement(CartesianGrid, { strokeDasharray: "3 3", stroke: C.border }), React.createElement(XAxis, { dataKey: "date", tick: { fontSize: 9, fill: C.text3 } }), React.createElement(YAxis, { tick: { fontSize: 9, fill: C.text3 } }), React.createElement(Tooltip, { contentStyle: { background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 11 } }), React.createElement(Bar, { dataKey: "minutes", fill: C.green, radius: [4, 4, 0, 0] }))))
+          ) : React.createElement(Cd, { style: { textAlign: "center", padding: 28 } }, React.createElement("div", { style: { fontSize: 28, marginBottom: 6 } }, "📈"), React.createElement("div", { style: { color: C.text3, fontSize: 13 } }, "Log some workouts to see progress!"))
+        );
+      };
+
+      // ─── NAV ───
+      const showNav = screen === "home" || screen === "history" || screen === "progress";
+      const renderNav = () => showNav && React.createElement("div", { style: { position: "fixed", bottom: 0, left: 0, right: 0, background: C.surface, borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "space-around", padding: "5px 0 max(5px, env(safe-area-inset-bottom))", zIndex: 100 } },
+        [{ id: "home", icon: "🏠", label: "Home" }, { id: "history", icon: "📋", label: "History" }, { id: "progress", icon: "📈", label: "Progress" }].map(tab =>
+          React.createElement("button", { key: tab.id, onClick: () => setScreen(tab.id), style: { background: "none", border: "none", color: screen === tab.id ? C.accent : C.text3, display: "flex", flexDirection: "column", alignItems: "center", gap: 1, cursor: "pointer", padding: "4px 20px", fontSize: 10, fontFamily: font, fontWeight: screen === tab.id ? 700 : 400 } },
+            React.createElement("span", { style: { fontSize: 17 } }, tab.icon), tab.label)
+        )
+      );
+
+      return React.createElement("div", { style: { maxWidth: 480, margin: "0 auto", position: "relative" } },
+        screen === "home" && renderHome(),
+        screen === "log_entry" && renderLogEntry(),
+        screen === "swap" && renderSwap(),
+        screen === "history" && renderHistory(),
+        screen === "progress" && renderProgress(),
+        renderNav()
+      );
+    }
+
+    ReactDOM.render(React.createElement(App), document.getElementById("root"));
+  </script>
+</body>
+</html>
